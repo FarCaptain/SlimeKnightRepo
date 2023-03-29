@@ -12,14 +12,18 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
-
+#include "Blueprint/UserWidget.h"
 #include "GameplayTagContainer.h"
 #include "Enemies/GrabableEnemy.h"
 #include "Math/UnrealMathUtility.h"
+#include <Runtime/Engine/Classes/Kismet/GameplayStatics.h>
+#include "Blueprint/UserWidget.h"
 #include "RCTGameModeBase.h"
 #include <Objects/GrabableObject.h>
 #include <SlimeKnightGameInstance.h>
 #include <SlimeKnightSaveGame.h>
+
+#include "ArmSplineComponent.h"
 
 
 // Sets default values
@@ -30,15 +34,19 @@ ARCTCharacter::ARCTCharacter()
 
 	handTarget = CreateDefaultSubobject<USkeleArmComponent>(TEXT("ArmComponent"));
 	realHand = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HandComponent"));
+	holdPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
 	cameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	isoCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("IsoCamera"));
 	handHolder = CreateDefaultSubobject<USceneComponent>(TEXT("HandHolder"));
 	handCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("HandCollision"));
-
+	punchCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("PunchCollision"));
+	
 	handTarget->SetupAttachment(RootComponent);
 	handHolder->SetupAttachment(RootComponent);
 	realHand->SetupAttachment(handHolder);
+	holdPoint->SetupAttachment(realHand);
 	handCollision->SetupAttachment(realHand);
+	punchCollision->SetupAttachment(realHand);
 	
 	cameraBoom->SetupAttachment(RootComponent);
 	cameraBoom->bUsePawnControlRotation = false;
@@ -48,6 +56,9 @@ ARCTCharacter::ARCTCharacter()
 	isoCamera->SetupAttachment(cameraBoom, USpringArmComponent::SocketName);
 	isoCamera->bUsePawnControlRotation = false;
 
+	armSplineComp = CreateDefaultSubobject<UArmSplineComponent>(TEXT("ArmSplineComponent"));
+	armSplineComp->SetupAttachment(RootComponent);
+
 	ability = nullptr;
 	grabbedActor = nullptr;
 }
@@ -56,7 +67,6 @@ ARCTCharacter::ARCTCharacter()
 void ARCTCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-
 	OnTakeAnyDamage.AddDynamic(this, &ARCTCharacter::PlayerDamage);
 }
 
@@ -97,6 +107,11 @@ void ARCTCharacter::Tick(float DeltaTime)
 
 #pragma region Events and prototypes
 
+void ARCTCharacter::OnPromptDevour_Implementation() {}
+void ARCTCharacter::OnEndPromptDevour_Implementation() {}
+void ARCTCharacter::OnLetGo_Implementation() {}
+void ARCTCharacter::OnGrab_Implementation() {}
+
 float ARCTCharacter::GetDevourDamage() const
 {
 	return devourDamage;
@@ -132,23 +147,6 @@ UNiagaraSystem* ARCTCharacter::GetThrowExplosionParticleEffect() const
 	return throwExplosionParticleEffect;
 }
 
-ARCTCharacter::FPromptDevourEvent& ARCTCharacter::OnPromptDevour() {
-	return promptDevourEvent;
-}
-
-ARCTCharacter::FEndPromptDevourEvent& ARCTCharacter::OnEndPromptDevour() {
-	return endPromptDevourEvent;
-}
-
-ARCTCharacter::FPlayerGrabEvent& ARCTCharacter::OnGrab()
-{
-	return playerGrabEvent;
-}
-
-ARCTCharacter::FPlayerLetGoEvent& ARCTCharacter::OnLetGo()
-{
-	return playerLetGoEvent;
-}
 #pragma endregion
 
 #pragma region Health & Stamina
@@ -160,6 +158,11 @@ void ARCTCharacter::PlayerDamage(AActor* DamagedActor, float Damage, const UDama
 		OnHealthChange(-Damage);
 
 		curInvincibilityDuration = hitInvincibilityDuration;
+	}
+
+	if (health <= 0 && !bIsDead) 
+	{
+		HandleDeathCase();
 	}
 }
 
@@ -174,18 +177,21 @@ void ARCTCharacter::OnHealthChange_Implementation(float modifier) {};
 
 #pragma region Abilities & Devour
 void ARCTCharacter::PromptForDevour() {
+	if (grabbedActor == nullptr)
+		return;
+
 	readyToDevour = true;
-	promptDevourEvent.Broadcast();
+	OnPromptDevour();
 }
 
 void ARCTCharacter::EndPromptForDevour() {
 	readyToDevour = false;
-	endPromptDevourEvent.Broadcast();
+	OnEndPromptDevour();
 }
 
 void ARCTCharacter::Devour()
 {
-	if (!readyToDevour)
+	if (!readyToDevour || grabbedActor == nullptr)
 		return;
 
 	FString grabbedName = grabbedActor->GetClass()->GetName();
@@ -237,6 +243,9 @@ void ARCTCharacter::Devour()
 		save->IncrementBestiaryData(grabbedName);
 		gameInstance->SaveGame();
 	}
+
+	// Make sure that we no longer display the devour prompt
+	OnEndPromptDevour();
 }
 
 void ARCTCharacter::AbilityExpire()
@@ -283,7 +292,7 @@ void ARCTCharacter::UpdateHandTargetLocation()
 	
 	if (inputLocation.Length() < armDeactivateThreshold)
 	{
-		inputLocation = armDefaultLocation;
+		inputLocation = armRestingLocation;
 	}
 	else
 	{
@@ -296,10 +305,10 @@ void ARCTCharacter::UpdateHandTargetLocation()
 			inputLocation.Normalize();
 			inputLocation *= armMinimumDistance;
 		}
+
 	}
 	
-	FRotator characterRotation = GetActorRotation();
-	inputLocation = characterRotation.RotateVector(inputLocation);
+
 	inputLocation *= maxArmLength;
 
 
@@ -310,7 +319,7 @@ void ARCTCharacter::UpdateHandTargetLocation()
 void ARCTCharacter::AttachToArm(AActor* ActorToAttach)
 {
 	FAttachmentTransformRules rules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, EAttachmentRule::KeepWorld, true);
-	ActorToAttach->AttachToComponent(handHolder, rules);
+	ActorToAttach->AttachToComponent(holdPoint, rules);
 }
 
 void ARCTCharacter::MultiplyHandSize(float scale)
@@ -357,8 +366,6 @@ void ARCTCharacter::Grab()
 		return;
 
 
-	playerGrabEvent.Broadcast();
-
 	grabbing = true;
 	currentStamina -= initialGrabCost;
 
@@ -377,11 +384,15 @@ void ARCTCharacter::Grab()
 		}
 	}
 	realHand->SetCollisionProfileName(FName("BlockAllDynamic"));
+	punchCollision->SetCollisionProfileName(FName("BlockAllDynamic"));
+
+
+	OnGrab();
 }
 
 void ARCTCharacter::LetGo()
 {
-	playerLetGoEvent.Broadcast();
+	OnLetGo();
 
 	readyToDevour = false;
 	grabbing = false;
@@ -392,6 +403,13 @@ void ARCTCharacter::LetGo()
 		grabbedActor = nullptr;
 	}
 	realHand->SetCollisionProfileName(FName("NoCollision"));
+	punchCollision->SetCollisionProfileName(FName("NoCollision"));
+}
+
+void ARCTCharacter::HandleDeathCase()
+{
+	bIsDead = true;
+	playerDeathEvent.Broadcast();
 }
 
 #pragma endregion

@@ -5,10 +5,14 @@
 #include "NiagaraSystem.h"
 #include "Abilities/BaseAbility.h"
 #include "CoreMinimal.h"
+#include "ArmSplineComponent.h"
+#include "SkeleArmComponent.h"
 #include "GameFramework/Character.h"
 #include "RCTCharacter.generated.h"
 
 class UGrabableInterface;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FPlayerDeathEvent);
 
 UCLASS()
 class RCT_API ARCTCharacter : public ACharacter
@@ -33,17 +37,17 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void AbsorbAfterDamaging(float damageDealt);
 
-	DECLARE_EVENT(ARCTCharacter, FPromptDevourEvent)
-	FPromptDevourEvent& OnPromptDevour();
+	UFUNCTION(BlueprintNativeEvent)
+	void OnPromptDevour();
 
-	DECLARE_EVENT(ARCTCharacter, FEndPromptDevourEvent)
-	FEndPromptDevourEvent& OnEndPromptDevour();
+	UFUNCTION(BlueprintNativeEvent)
+	void OnEndPromptDevour();
 	
-	DECLARE_EVENT(ARCTCharacter, FPlayerGrabEvent)
-	FPlayerGrabEvent& OnGrab();
+	UFUNCTION(BlueprintNativeEvent)
+	void OnGrab();
 
-	DECLARE_EVENT(ARCTCharacter, FPlayerLetGoEvent)
-	FPlayerLetGoEvent& OnLetGo();
+	UFUNCTION(BlueprintNativeEvent)
+	void OnLetGo();
 
 	UFUNCTION(BlueprintNativeEvent)
 	void OnHealthChange(float modifier);
@@ -108,12 +112,38 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void SetAbility(TSubclassOf<UBaseAbility> ability);
 
+	UPROPERTY(BlueprintAssignable)
+	FPlayerDeathEvent playerDeathEvent;
+
+	UFUNCTION(BlueprintCallable)
+	void HandleDeathCase();
+	
+	FVector GetRealHandJointLocation()
+	{
+		return realHand->GetSocketLocation("HandSocket");
+	}
+
+	FVector GetHandTargetLocation()
+	{
+		return handTarget->GetComponentLocation();
+	}
+	
+	FVector GetShoulderJointLocation()
+	{
+		return GetMesh()->GetSocketLocation("ArmSocket");
+	}
+
+	FTimerHandle deathCaseHandle;
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	class USkeleArmComponent* handTarget;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	class USkeletalMeshComponent* realHand;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
+	class USceneComponent* holdPoint;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	class USpringArmComponent* cameraBoom;
@@ -124,10 +154,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	class USceneComponent* handHolder;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Spline")
+	UArmSplineComponent* armSplineComp;
 	
-
-	
-
 	UPROPERTY(BlueprintReadOnly)
 	FVector2D rightStickInputLocation;
 
@@ -139,6 +168,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	class UBoxComponent* handCollision;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccees = "true"))
+	UBoxComponent* punchCollision;
 
 
 #pragma region Throwing
@@ -195,6 +227,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Health & Stamina")
 	float hitInvincibilityDuration = 0.5f;
 
+	UPROPERTY(BlueprintReadWrite, Category = "Health & Stamina")
+	float percentDamageOnOverlap = 0.05f;
+
 #pragma endregion
 #pragma region Arm
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Arm", meta = (AllowPrivateAccess = "true"))
@@ -210,10 +245,14 @@ protected:
 	float armDeactivateThreshold = 0.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Arm")
-	FVector armDefaultLocation = FVector(0.0f, 0.0f, 0.0f);
+	FVector armRestingLocation = FVector(0.0f, 0.0f, 0.0f);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Arm")
 	float armMinimumDistance = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Arm")
+	bool grabbing = false;
+
 #pragma endregion
 	UFUNCTION(BlueprintCallable)
 	void SetHandAutomation(bool shouldAutomate);
@@ -226,13 +265,9 @@ protected:
 
 	bool bShouldAutomateHand = true;
 
-	FPromptDevourEvent promptDevourEvent;
-	FEndPromptDevourEvent endPromptDevourEvent;
-	FPlayerGrabEvent playerGrabEvent;
-	FPlayerLetGoEvent playerLetGoEvent;
-
 private:
 	float curInvincibilityDuration = 0.f;
 	bool readyToDevour = false; // Whether or not the enemy in the player's hand is ready to be devoured
-	bool grabbing = false;
+	bool bIsDead = false;
+	
 };
