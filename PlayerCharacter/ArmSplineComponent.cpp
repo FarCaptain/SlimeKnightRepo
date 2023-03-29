@@ -22,8 +22,6 @@ UArmSplineComponent::UArmSplineComponent()
 	Spline->ClearSplinePoints();
 }
 
-
-
 void UArmSplineComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -101,7 +99,7 @@ void UArmSplineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 
 	LowerSamplePoint = FMath::Lerp(shoulderPos, LowerSamplePoint, LowerDistancePercentage);
 	UpperSamplePoint = FMath::Lerp(shoulderPos, UpperSamplePoint, UpperDistancePercentage);
-
+	
 	float tValue = 0.0f;
 	float tIncrement = 1.0f / ((float)SplinePointCount - 1.0f);
 	for (int32 i = 0; i < SplinePointCount; i++)
@@ -122,13 +120,22 @@ void UArmSplineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	}
 }
 
-
+//Cubic Bezier Curve
 FVector UArmSplineComponent::CalculateCurvePoint(float tValue, FVector position0, FVector position1, FVector position2, FVector position3)
 {
-	return (FMath::Pow((1 - tValue), 3.0f) * position0) +
-		(3 * FMath::Pow((1 - tValue), 2.0f) * tValue * position1) +
-		(3 * (1 - tValue) * FMath::Pow(tValue, 2.0f) * position2) +
-		(FMath::Pow(tValue, 3.0f) * position3);
+	float oneMinusT = 1.0f - tValue;
+	float oneMinusTSquare = oneMinusT * oneMinusT;
+	float oneMinusTCube = oneMinusTSquare * oneMinusT;
+
+	float tSquare = tValue * tValue;
+	float tCube = tSquare * tValue;
+
+	FVector term1 = oneMinusTCube * position0;
+	FVector term2 = 3.0f * oneMinusTSquare * tValue * position1;
+	FVector term3 = 3.0f * oneMinusT * tSquare * position2;
+	FVector term4 = tCube * position3;
+
+	return term1 + term2 + term3 + term4;
 }
 
 UNiagaraSystem* UArmSplineComponent::GetArmHitParticleEffect() const
