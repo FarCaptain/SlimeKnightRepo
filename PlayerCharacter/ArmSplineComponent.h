@@ -5,10 +5,12 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Components/SplineComponent.h"
-#include "Components/SplineMeshComponent.h"
 #include "ArmSplineComponent.generated.h"
 
 class AEnemyBase;
+class ARCTCharacter;
+class USplineMeshComponent;
+
 UENUM(BlueprintType)
 enum class EArmCollision : uint8 {
 	VE_NoCollision       UMETA(DisplayName = "NoCollision"),
@@ -18,7 +20,7 @@ enum class EArmCollision : uint8 {
 };
 
 UCLASS( Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class RCT_API UArmSplineComponent : public UActorComponent
+class RCT_API UArmSplineComponent : public USceneComponent
 {
 	GENERATED_BODY()
 
@@ -41,23 +43,20 @@ public:
 		FVector2D SplineMeshEndScale = FVector2D(0.65, 0.65);
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
 		float HideArmThreshold = 0.5;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
-		EArmCollision ArmCollisionType = EArmCollision::VE_QueryOnly;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="ArmHit")
-		float ArmHitDamage = 0.5f;
+	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
+		float ArmHitDamage = 1.f;
+	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
+		float ArmStayDamage = 0.2f;
+	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
+		float ArmStayDamageTimeInterval = 0.f;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ArmHit")
 		UNiagaraSystem* ArmHitParticleEffect;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ArmHit")
 		USoundBase* ArmHitSound;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Positions")
-		AActor* PlayerActor;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Positions")
-		USkeletalMeshComponent* HandTargetComponent;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Positions")
-		USkeletalMeshComponent* RealHandComponent;
-
+		ARCTCharacter* PlayerCharacter;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Positions")
 		float LowerPointDeviation = 0.9f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Positions")
@@ -71,10 +70,8 @@ public:
 	UArmSplineComponent();
 
 protected:
-	// Called when the game starts
-	virtual void BeginPlay() override;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Spline")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
 	TArray<USplineMeshComponent*> SplineMeshes;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Positions")
@@ -85,6 +82,12 @@ protected:
 
 	// Only call stuff once with the whole arm instead of doing it for each spline mesh
 	TMap<AEnemyBase*, int> EnemyRecord;
+
+	virtual void BeginPlay() override;
+
+	void SetUpSplineMeshes();
+
+	virtual void OnComponentCreated() override;
 
 public:	
 	// Called every frame

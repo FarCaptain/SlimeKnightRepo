@@ -8,6 +8,8 @@
 #include "Engine/ICookInfo.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
+#include "PlayerCharacter/RCTCharacter.h"
+#include "Components/SplineMeshComponent.h"
 
 // Sets default values for this component's properties
 UArmSplineComponent::UArmSplineComponent()
@@ -15,129 +17,100 @@ UArmSplineComponent::UArmSplineComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickInterval = 0.03f;
 	Spline = CreateDefaultSubobject<USplineComponent>("Spline");
-	//SplineMeshStaticMesh = CreateDefaultSubobject<UStaticMesh>(TEXT("MyFMesh"))
-
+	Spline->SetMobility(EComponentMobility::Movable);
+	
 	Spline->ClearSplinePoints();
-
-	if (SplineMeshes.Num() > 0)
-		SplineMeshes.Empty();
-
-	for (int32 i = 0; i < SplinePointCount; i++)
-	{
-		Spline->AddSplinePointAtIndex(FVector(0, i * 5, 0), i, ESplineCoordinateSpace::World);
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("Hello: %d, %d"), SplinePointCount, Spline->GetNumberOfSplinePoints());
 }
 
 
-// Called when the game starts
+
 void UArmSplineComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// doing intialization in Beginplay because 
-	PlayerActor = GetOwner();
-
-	ECollisionEnabled::Type collisionType = ECollisionEnabled::NoCollision;
-	switch (ArmCollisionType)
+	PlayerCharacter = Cast<ARCTCharacter>(GetOwner());
+	if(ensure(PlayerCharacter))
 	{
-	case EArmCollision::VE_NoCollision:
-		collisionType = ECollisionEnabled::NoCollision;
-		break;
-	case EArmCollision::VE_QueryOnly:
-		collisionType = ECollisionEnabled::QueryOnly;
-		break;
-	case EArmCollision::VE_PhysicsOnly:
-		collisionType = ECollisionEnabled::PhysicsOnly;
-		break;
-	case EArmCollision::VE_QueryAndPhysics:
-		collisionType = ECollisionEnabled::QueryAndPhysics;
-		break;
+		for (int32 i = 0; i < SplinePointCount - 1; i++)
+		{
+			USplineMeshComponent* splineMesh = SplineMeshes[i];
+			splineMesh->SetVisibility(true);
+		}
 	}
+}
 
+void UArmSplineComponent::SetUpSplineMeshes()
+{
+	for (int32 i = 0; i < SplinePointCount; i++)
+	{
+		Spline->AddSplinePointAtIndex(FVector(0, i * 5, 0), i, ESplineCoordinateSpace::World);
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Hello: %d, %d"), SplinePointCount, Spline->GetNumberOfSplinePoints());
+	
+	if (SplineMeshes.Num() > 0)
+		SplineMeshes.Empty();
+	
 	for (int32 i = 0; i < SplinePointCount - 1; i++)
 	{
-		USplineMeshComponent* splineMesh = NewObject<USplineMeshComponent>(PlayerActor, USplineMeshComponent::StaticClass());
-
+		USplineMeshComponent* splineMesh = NewObject<USplineMeshComponent>(this, USplineMeshComponent::StaticClass());
+		
 		splineMesh->SetStaticMesh(SplineMeshStaticMesh);
 		splineMesh->SetMobility(EComponentMobility::Movable);
 		splineMesh->SetForwardAxis(ESplineMeshAxis::Z);
 
 		splineMesh->SetStartScale(SplineMeshStartScale);
 		splineMesh->SetEndScale(SplineMeshEndScale);
-
-		//splineMesh->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+		
 		splineMesh->RegisterComponentWithWorld(GetWorld());
-		splineMesh->AttachToComponent(Spline, FAttachmentTransformRules::KeepRelativeTransform);
+		// splineMesh->AttachToComponent(Spline, FAttachmentTransformRules::KeepRelativeTransform);
 
 		FVector startLocation, startTangent, endLocation, endTangent;
-		Spline->GetLocationAndTangentAtSplinePoint(i, startLocation, startTangent, ESplineCoordinateSpace::Local);
-		Spline->GetLocationAndTangentAtSplinePoint(i + 1, endLocation, endTangent, ESplineCoordinateSpace::Local);
+		Spline->GetLocationAndTangentAtSplinePoint(i, startLocation, startTangent, ESplineCoordinateSpace::World);
+		Spline->GetLocationAndTangentAtSplinePoint(i + 1, endLocation, endTangent, ESplineCoordinateSpace::World);
 		splineMesh->SetStartAndEnd(startLocation, startTangent, endLocation, endTangent, true);
 		splineMesh->SetMaterial(0, SplineMeshMaterial);
-		splineMesh->Activate(true);
-		splineMesh->UpdateMesh();
-
-		// splineMesh->SetCollisionObjectType(ECollisionChannel::ECC_Pawn);
-		// splineMesh->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+		
 		splineMesh->SetCollisionProfileName(FName("SplineArm"));
-		splineMesh->SetCollisionEnabled(collisionType);
+		splineMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
 		splineMesh->OnComponentBeginOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapBegin);
 		splineMesh->OnComponentEndOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapEnd);
-		
+	
 		SplineMeshes.Add(splineMesh);
-	}
-
-	TSet handComponentSet = PlayerActor->GetComponents();
-	for (auto it : handComponentSet)
-	{
-		FString name = it->GetName();
-		if (name == "ArmComponent")
-			HandTargetComponent = Cast<USkeletalMeshComponent>(it);
-		else if (name == "HandComponent")
-			RealHandComponent = Cast<USkeletalMeshComponent>(it);
 	}
 }
 
+void UArmSplineComponent::OnComponentCreated()
+{
+	Super::OnComponentCreated();
 
-// Called every frame
+	SetUpSplineMeshes();
+	Spline->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+}
+
 void UArmSplineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	FVector playerPos = Cast<ACharacter>(PlayerActor)->GetMesh()->GetSocketLocation("ArmSocket");
+	FVector shoulderPos = PlayerCharacter->GetShoulderJointLocation();
 	
-	// doesn't work
-	FVector realHandPos = RealHandComponent->GetComponentLocation();
-	FVector handTargetPos = HandTargetComponent->GetComponentLocation();
-
-	bool isVisable = FVector::Dist(playerPos, realHandPos) >= HideArmThreshold;
-	if (!isVisable)
-	{
-		for (int32 i = 0; i < SplineMeshes.Num(); i++)
-		{
-			SplineMeshes[i]->SetVisibility(false);
-			//SplineMeshes[i]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		}
-		return;
-	}
+	FVector realHandPos = PlayerCharacter->GetRealHandJointLocation();
+	FVector handTargetPos = PlayerCharacter->GetHandTargetLocation();
 
 	LowerSamplePoint = FMath::Lerp(realHandPos, handTargetPos, LowerPointDeviation);
 	UpperSamplePoint = FMath::Lerp(realHandPos, handTargetPos, UpperPointDeviation);
 
-	LowerSamplePoint = FMath::Lerp(playerPos, LowerSamplePoint, LowerDistancePercentage);
-	UpperSamplePoint = FMath::Lerp(playerPos, UpperSamplePoint, UpperDistancePercentage);
+	LowerSamplePoint = FMath::Lerp(shoulderPos, LowerSamplePoint, LowerDistancePercentage);
+	UpperSamplePoint = FMath::Lerp(shoulderPos, UpperSamplePoint, UpperDistancePercentage);
 
 	float tValue = 0.0f;
-	float tIncrement = (1.0f / (float)SplinePointCount);
+	float tIncrement = 1.0f / ((float)SplinePointCount - 1.0f);
 	for (int32 i = 0; i < SplinePointCount; i++)
 	{
-		FVector pos = CalculateCurvePoint(tValue, playerPos, LowerSamplePoint, UpperSamplePoint, realHandPos);
+		FVector pos = CalculateCurvePoint(tValue, shoulderPos, LowerSamplePoint, UpperSamplePoint, realHandPos);
 		Spline->SetLocationAtSplinePoint(i, pos, ESplineCoordinateSpace::World);
 		tValue += tIncrement;
 	}
-
-	// SplineMesh
+	
 	for (int32 i = 0; i < SplinePointCount - 1; i++)
 	{
 		USplineMeshComponent* splineMesh = SplineMeshes[i];
@@ -146,12 +119,6 @@ void UArmSplineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		Spline->GetLocationAndTangentAtSplinePoint(i, startLocation, startTangent, ESplineCoordinateSpace::World);
 		Spline->GetLocationAndTangentAtSplinePoint(i + 1, endLocation, endTangent, ESplineCoordinateSpace::World);
 		splineMesh->SetStartAndEnd(startLocation, startTangent, endLocation, endTangent, true);
-		// splineMesh->bNeverDistanceCull = true;
-		// splineMesh->Activate(true);
-		// splineMesh->SetVisibility(true);
-
-		// splineMesh->bAllowCullDistanceVolume = false;
-		// splineMesh->bMeshDirty = true;
 	}
 }
 
@@ -171,7 +138,7 @@ UNiagaraSystem* UArmSplineComponent::GetArmHitParticleEffect() const
 
 void UArmSplineComponent::OnEnemyOverlaped_Implementation(AEnemyBase* enemy)
 {
-	enemy->TakeDamage(ArmHitDamage, FPointDamageEvent(), PlayerActor->GetInstigatorController(), PlayerActor);
+	enemy->TakeDamage(ArmHitDamage, FPointDamageEvent(), PlayerCharacter->GetInstigatorController(), PlayerCharacter);
 	enemy->Stun();
 	UNiagaraFunctionLibrary::SpawnSystemAtLocation( GetWorld(), ArmHitParticleEffect, enemy->GetTransform().GetLocation());
 	UGameplayStatics::PlaySound2D(GetWorld(), ArmHitSound);
@@ -190,9 +157,16 @@ void UArmSplineComponent::SetSplineMeshMaterial(UMaterialInstance* mat)
 
 void UArmSplineComponent::OnOverlapBegin(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	// may use a cast later
+	if(OtherActor && OtherActor == GetOwner())
+	{
+		return;
+	}
+
+	// DrawDebugString(GetWorld(), OtherActor->GetActorLocation(), AActor::GetDebugName(OtherActor), nullptr, FColor::Yellow, 6.0f, true);
+	// DrawDebugString(GetWorld(), OtherActor->GetActorLocation(), OtherComp->GetName(), nullptr, FColor::Yellow, 6.0f, true);
+	
 	if (OtherActor && OtherActor->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass())
-		&& OtherActor && IGrabableInterface::Execute_CanBeGrabbed(OtherActor))
+		&& IGrabableInterface::Execute_CanBeGrabbed(OtherActor))
 	{
 		// Arm Hit
 		if(AEnemyBase* enemy = Cast<AEnemyBase>(OtherActor))
@@ -201,6 +175,7 @@ void UArmSplineComponent::OnOverlapBegin(class UPrimitiveComponent* OverlappedCo
 			{
 				EnemyRecord.Add(enemy, 1);
 				OnEnemyOverlaped(enemy);
+				enemy->TakePeriodicDamage(ArmStayDamage, ArmStayDamageTimeInterval);
 			}
 			else
 			{
@@ -222,7 +197,8 @@ void UArmSplineComponent::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AAct
 			if(EnemyRecord.Contains(enemy))
 			{
 				-- EnemyRecord[enemy];
-
+				enemy->StopPeriodicDamage();
+			
 				if(EnemyRecord[enemy] < 0)
 					UE_LOG(LogTemp, Error, TEXT("[SplineArm] EnemyRecord became negative!"));
 				if(EnemyRecord[enemy] == 0)
