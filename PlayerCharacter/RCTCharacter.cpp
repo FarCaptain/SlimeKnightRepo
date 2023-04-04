@@ -191,8 +191,10 @@ void ARCTCharacter::EndPromptForDevour() {
 
 void ARCTCharacter::Devour()
 {
-	if (!readyToDevour || grabbedActor == nullptr)
+	if (!readyToDevour || grabbedActor == nullptr) {
+		OnEndPromptDevour();
 		return;
+	}
 
 	FString grabbedName = grabbedActor->GetClass()->GetName();
 
@@ -204,8 +206,9 @@ void ARCTCharacter::Devour()
 	}
 
 	else {
-		FGameplayTagContainer abilities = Cast<AEnemyBase>(grabbedActor)->GetAbilityTags();
+		armSplineComp->StopDevourBulgeTimeline();
 
+		FGameplayTagContainer abilities = Cast<AEnemyBase>(grabbedActor)->GetAbilityTags();
 		// If they have an ability, give the player a random one (or their only one)
 		if (abilities.Num() > 0) {
 			int randInd = FMath::RandRange(0, abilities.Num() - 1);
@@ -234,6 +237,9 @@ void ARCTCharacter::Devour()
 				}
 			}
 		}
+
+		grabbedActor->Destroy();
+		grabbedActor = nullptr;
 	}
 
 	USlimeKnightGameInstance* gameInstance = Cast<USlimeKnightGameInstance>(GetGameInstance());
@@ -379,6 +385,10 @@ void ARCTCharacter::Grab()
 			{
 				IGrabableInterface::Execute_Grab(actor, this);
 				grabbedActor = actor;
+
+				// bulge effect
+				armSplineComp->StartDevourBulgeTimeline();
+
 				break;
 			}
 		}
@@ -399,6 +409,7 @@ void ARCTCharacter::LetGo()
 
 	if (grabbedActor)
 	{
+		armSplineComp->StopDevourBulgeTimeline();
 		IGrabableInterface::Execute_LetGo(grabbedActor, this);
 		grabbedActor = nullptr;
 	}

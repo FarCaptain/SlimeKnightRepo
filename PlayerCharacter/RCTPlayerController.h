@@ -26,6 +26,7 @@ public:
 	void LetGo();
 	void Devour();
 
+	UPROPERTY(BlueprintReadWrite)
 	bool bRestartOnDestroy = true;
 
 private:

@@ -14,7 +14,7 @@ void ARCTPlayerController::OnPossess(APawn* InPawn)
 	Super::OnPossess(InPawn);
 
 	myPawn = Cast<ARCTCharacter>(InPawn);
-	myPawn->OnDestroyed.AddDynamic(this, &ARCTPlayerController::PossessedPawnDestroyed);
+	//myPawn->OnDestroyed.AddDynamic(this, &ARCTPlayerController::PossessedPawnDestroyed);
 }
 
 void ARCTPlayerController::SetupInputComponent()
@@ -33,21 +33,25 @@ void ARCTPlayerController::SetupInputComponent()
 
 void ARCTPlayerController::ArmX(float value)
 {
+	if(myPawn)
 	myPawn->UpdateArmX(value);
 }
 
 void ARCTPlayerController::ArmY(float value)
 {
+	if (myPawn)
 	myPawn->UpdateArmY(value);
 }
 
 void ARCTPlayerController::MoveX(float value)
 {
+	if (myPawn)
 	myPawn->UpdateMoveX(value);
 }
 
 void ARCTPlayerController::MoveY(float value)
 {
+	if (myPawn)
 	myPawn->UpdateMoveY(value);
 }
 
@@ -69,7 +73,7 @@ void ARCTPlayerController::PossessedPawnDestroyed(AActor* act)
 {
 	if (bRestartOnDestroy)
 	{
-		FName currentLevelName(UGameplayStatics::GetCurrentLevelName(GetWorld()));
-		UGameplayStatics::OpenLevel(GetWorld(), currentLevelName);
+		//FName currentLevelName(UGameplayStatics::GetCurrentLevelName(GetWorld()));
+		//UGameplayStatics::OpenLevel(GetWorld(), currentLevelName);
 	}
 }

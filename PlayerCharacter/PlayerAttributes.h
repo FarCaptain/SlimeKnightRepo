@@ -18,9 +18,6 @@ public:
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "General")
-	int playerLevel;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Attack")
 	float attackModifier;
@@ -30,6 +27,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Attack")
 	float armOverlapDamagePercentage;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Attack")
+	float ArmOverlapStaySlowPercentage;
 
 	UFUNCTION(BlueprintNativeEvent)
 	void OnPlayerLevelChanged();
@@ -43,12 +43,6 @@ protected:
 public:	
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-	UFUNCTION(BlueprintCallable)
-	void SetPlayerLevel(int level);
-
-	UFUNCTION(BlueprintCallable)
-	int GetPlayerLevel();
 
 	UFUNCTION(BlueprintCallable)
 	void SetAttackModifier(float mod);

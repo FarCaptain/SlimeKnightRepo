@@ -18,4 +18,11 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	void RotateArm();
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+	float PitchMod;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+	float YawMod;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+	float RollMod;
 };

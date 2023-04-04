@@ -1,10 +1,11 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// 2022 - 2023 Lucas Qu @SlimeKnight
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "Components/SplineComponent.h"
+#include "Components/SplineMeshComponent.h"
+#include "Components/TimelineComponent.h"
 #include "ArmSplineComponent.generated.h"
 
 class AEnemyBase;
@@ -43,6 +44,10 @@ public:
 		FVector2D SplineMeshEndScale = FVector2D(0.65, 0.65);
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
 		float HideArmThreshold = 0.5;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
+		FVector TangentScale = FVector(1);
+
 
 	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
 		float ArmHitDamage = 1.f;
@@ -66,13 +71,45 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Positions")
 		float UpperDistancePercentage = 0.75;
 
-	// Sets default values for this component's properties
+	UFUNCTION()
+	void StartDevourBulgeTimeline();
+
+	UFUNCTION()
+	void StopDevourBulgeTimeline();
+
 	UArmSplineComponent();
 
 protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
 	TArray<USplineMeshComponent*> SplineMeshes;
+
+	UPROPERTY(EditDefaultsOnly, Category = "DevourEffect")
+	UCurveFloat* DevourBulgeMovingCurve;
+
+	UPROPERTY(EditDefaultsOnly, Category = "DevourEffect")
+	float DevourBulgeMovingSpeed = 0.5f;
+
+	// Used to offset min value so we can get a pause in between loops
+	UPROPERTY(EditDefaultsOnly, Category = "DevourEffect")
+	float BulgeTimelineOffset = 0;
+
+	UPROPERTY(EditDefaultsOnly, Category = "DevourEffect")
+	float BulgeAmplitude = 2.3f;
+
+	UPROPERTY(VisibleAnywhere, Category = "DevourEffect")
+	TArray<float> BulgeScaleIncrements;
+	
+	void SetUpBulgeParameters();
+
+	UPROPERTY()
+	FTimeline DevourBulgeTimeline;
+	
+	int32 BulgeCenterIdx;
+	
+	int32 BulgeRadius = 4;
+	
+	bool bIsBulging = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Positions")
 	FVector LowerSamplePoint;
@@ -85,11 +122,31 @@ protected:
 
 	virtual void BeginPlay() override;
 
+	UFUNCTION()
+	void DevourBulgeUpdate(float Alpha);
+	UFUNCTION()
+	void DevourBulgeFinished();
+
 	void SetUpSplineMeshes();
 
 	virtual void OnComponentCreated() override;
 
-public:	
+	void SetSplineMeshScale(USplineMeshComponent* splineMesh, const FVector2D& startScale, const FVector2D& endScale)
+	{
+		const FVector2D& originalStartScale = splineMesh->GetStartScale();
+		const FVector2D& originalEndScale = splineMesh->GetEndScale();
+
+		if(originalStartScale != startScale)
+		{
+			splineMesh->SetStartScale(startScale, false);
+		}
+		if(originalEndScale != endScale)
+		{
+			splineMesh->SetEndScale(endScale, false);
+		}
+	}
+
+public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -109,5 +166,5 @@ public:
 	void SetSplineMeshMaterial(UMaterialInstance* mat);
 	
 private:
-	FVector CalculateCurvePoint(float tValue, FVector position0, FVector position1, FVector position2, FVector position3);
+	FVector CalculateCurvePoint(float tValue, FVector& position0, FVector& position1, FVector& position2, FVector& position3);
 };
