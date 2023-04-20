@@ -5,22 +5,24 @@
 #include "GameplayTagContainer.h"
 
 #include "CoreMinimal.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
 #include "EnemyBase.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FEnemyDeathEvent);
+
 UCLASS()
-class RCT_API AEnemyBase : public APawn
+class RCT_API AEnemyBase : public ACharacter
 {
 	GENERATED_BODY()
+
+private:
+	void DelayedDestroy();
 
 public:
 	// Sets default values for this pawn's properties
 	AEnemyBase();
 
-	/** Called when player health is <= 0 for the first time */
-	DECLARE_EVENT(AEnemyBase, FEnemyDeathEvent)
-	FEnemyDeathEvent& OnDeath();
-
+	
 	/** Returns Enemies Max Health */
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	float GetMaxHealth() const;
@@ -42,6 +44,12 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void ResetAttack();
 
+	UFUNCTION()
+	void TakePeriodicDamage(float amount, float timeInterval);
+
+	UFUNCTION()
+	void StopPeriodicDamage();
+
 	/** Returns the Enemies AbilityTags */
 	FGameplayTagContainer GetAbilityTags() const;
 
@@ -52,18 +60,30 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent)
 	void Stun();
 
+	UFUNCTION(BlueprintCallable)
+	bool IsDead();
+
 	virtual float TakeDamage(float damageAmount, FDamageEvent const& damageEvent, AController* eventInstigator, AActor* damageCauser) override;
 
 protected:
 
 	UFUNCTION()
-	void SetupStats();
+	virtual void SetupStats();
+
+	UFUNCTION()
+	void ApplyArmStayDamage();
 
 	UFUNCTION(BlueprintCallable)
 	void FinishAttack();
 
 	UPROPERTY()
 	bool bAttackFinished;
+
+	UPROPERTY()
+	bool bIsGrabbable;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+	float deathTimeBeforeRespawn = 2.5f;
 
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -72,7 +92,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, meta = (ClampMin = "1.0"))
 	float maxHealth;
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadWrite)
 	float health;
 
 	/** The Enemies base damage variable */
@@ -83,7 +103,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	float attackSpeed;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float attackRange;
 
 	UPROPERTY()
@@ -96,7 +116,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, meta = (ClampMin = "0.0"))
 	float pursueRadius;
 
+	UPROPERTY(BlueprintAssignable)
 	FEnemyDeathEvent deathEvent;
+	FEnemyDeathEvent hpZeroEvent;
 
 	/** Tags to define behavior and abilities */
 	UPROPERTY(EditAnywhere)
@@ -104,6 +126,10 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category="EnemyStats")
 	class UDataTable* enemyStatsTable;
+
+	float armStayDamage = 0.f;
+	FTimerHandle periodicDamageHandle;
+	FTimerHandle deathTimerHandle;
 
 public:	
 	// Called every frame

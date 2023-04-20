@@ -1,6 +1,8 @@
 // 2022 - 2023 Lucas Qu @SlimeKnight
 
 #include "ArmSplineComponent.h"
+
+#include "DynamicCameraShake.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Enemies/GrabableEnemy.h"
 #include "Engine/ICookInfo.h"
@@ -13,11 +15,12 @@
 UArmSplineComponent::UArmSplineComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-	PrimaryComponentTick.TickInterval = 0.03f;
+	//PrimaryComponentTick.TickInterval = 0.03f;
 	Spline = CreateDefaultSubobject<USplineComponent>("Spline");
 	Spline->SetMobility(EComponentMobility::Movable);
 
 	Spline->ClearSplinePoints();
+	HandInput = FVector2D::Zero();
 }
 
 void UArmSplineComponent::OnComponentCreated()
@@ -82,8 +85,6 @@ void UArmSplineComponent::DevourBulgeUpdate(float Alpha)
 void UArmSplineComponent::DevourBulgeFinished()
 {
 	BulgeCenterIdx = SplinePointCount - 1 - BulgeRadius;
-	// if(GEngine)
-	// 	GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("FINISHED"));
 }
 
 void UArmSplineComponent::SetUpBulgeParameters()
@@ -187,6 +188,10 @@ void UArmSplineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		}
 		SetSplineMeshScale(splineMesh, startScale, endScale);
 		splineMesh->UpdateMesh();
+
+		// make it sweep
+		// FHitResult HitResult;
+		// splineMesh->MoveComponent(FVector::ZeroVector, splineMesh->GetComponentRotation(), true, &HitResult);
 	}
 }
 
@@ -213,12 +218,27 @@ UNiagaraSystem* UArmSplineComponent::GetArmHitParticleEffect() const
 	return ArmHitParticleEffect;
 }
 
+
 void UArmSplineComponent::OnEnemyOverlaped_Implementation(AEnemyBase* enemy)
 {
 	enemy->TakeDamage(ArmHitDamage, FPointDamageEvent(), PlayerCharacter->GetInstigatorController(), PlayerCharacter);
 	enemy->Stun();
 	UNiagaraFunctionLibrary::SpawnSystemAtLocation( GetWorld(), ArmHitParticleEffect, enemy->GetTransform().GetLocation());
 	UGameplayStatics::PlaySound2D(GetWorld(), ArmHitSound);
+	armHitEvent.Broadcast(enemy);
+	
+	if(armHitCamShake)
+	{
+		if(HitPredict != FVector2D::Zero())
+		{
+			UDynamicCameraShake::UpdateCamShake(armHitCamShake, HitPredict);
+			UGameplayStatics::PlayWorldCameraShake(this, armHitCamShake, enemy->GetActorLocation(), 0, 50000, 1, true);
+		}
+		else
+		{
+			// fall back cam shake
+		}
+	}
 }
 
 void UArmSplineComponent::SetSplineMeshMaterial(UMaterialInstance* mat)
@@ -242,8 +262,7 @@ void UArmSplineComponent::OnOverlapBegin(class UPrimitiveComponent* OverlappedCo
 	// DrawDebugString(GetWorld(), OtherActor->GetActorLocation(), AActor::GetDebugName(OtherActor), nullptr, FColor::Yellow, 6.0f, true);
 	// DrawDebugString(GetWorld(), OtherActor->GetActorLocation(), OtherComp->GetName(), nullptr, FColor::Yellow, 6.0f, true);
 	
-	if (OtherActor && OtherActor->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass())
-		&& IGrabableInterface::Execute_CanBeGrabbed(OtherActor))
+	if (OtherActor->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()) && !IGrabableInterface::Execute_IsGrabbed(OtherActor))
 	{
 		// Arm Hit
 		if(AEnemyBase* enemy = Cast<AEnemyBase>(OtherActor))
@@ -251,6 +270,8 @@ void UArmSplineComponent::OnOverlapBegin(class UPrimitiveComponent* OverlappedCo
 			if(!EnemyRecord.Contains(enemy))
 			{
 				EnemyRecord.Add(enemy, 1);
+
+				
 				OnEnemyOverlaped(enemy);
 				enemy->TakePeriodicDamage(ArmStayDamage, ArmStayDamageTimeInterval);
 			}
@@ -264,8 +285,7 @@ void UArmSplineComponent::OnOverlapBegin(class UPrimitiveComponent* OverlappedCo
 
 void UArmSplineComponent::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-	if (OtherActor->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass())
-	&& OtherActor && IGrabableInterface::Execute_CanBeGrabbed(OtherActor))
+	if (OtherActor->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()) && !IGrabableInterface::Execute_IsGrabbed(OtherActor))
 	{
 		// Arm Hit
 		if(AEnemyBase* enemy = Cast<AEnemyBase>(OtherActor))
@@ -286,4 +306,31 @@ void UArmSplineComponent::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AAct
 			}
 		}
 	}
+}
+
+void UArmSplineComponent::RemoveOverlapRecord(AEnemyBase* enemy)
+{
+	if(EnemyRecord.Contains(enemy))
+	{
+		EnemyRecord.Remove(enemy);
+	}
+}
+
+void UArmSplineComponent::UpdateHandInput(FVector2D inputVector)
+{
+	FVector2D currentInput = inputVector.GetSafeNormal();
+	HitPredict = FVector2D::Zero();
+	if(HandInput != FVector2D::Zero())
+	{
+		float cross = FVector2D::CrossProduct(HandInput, currentInput);
+		if(cross > 0)
+		{
+			HitPredict = FVector2D(currentInput.Y, -currentInput.X);
+		}
+		else if(cross < 0)
+		{
+			HitPredict = FVector2D(currentInput.Y, -currentInput.X);
+		}
+	}
+	HandInput = currentInput;
 }

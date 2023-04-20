@@ -4,9 +4,13 @@
 #include "Enemies/EnemyBase.h"
 #include "Enemies/EnemyStatData.h"
 #include "Engine/DataTable.h"
+#include "Objects/LevelTransitionVolumeBase.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include <Runtime/Engine/Classes/Kismet/GameplayStatics.h>
 
-#include "GameFramework/PawnMovementComponent.h"
-#include "GameFramework/FloatingPawnMovement.h"
+#include "AIController.h"
+#include "BrainComponent.h"
+#include "Components/CapsuleComponent.h"
 
 // Sets default values
 AEnemyBase::AEnemyBase()
@@ -26,6 +30,16 @@ void AEnemyBase::BeginPlay()
 	Super::BeginPlay();
 	SetupStats();
 
+	auto alevelTransitionVolume = UGameplayStatics::GetActorOfClass(GetWorld(), ALevelTransitionVolumeBase::StaticClass());
+	auto levelTransitionVolume = Cast<ALevelTransitionVolumeBase>(alevelTransitionVolume);
+
+	if (levelTransitionVolume) 
+	{
+		levelTransitionVolume -> enemyCount++;
+		// deathEvent.AddUObject(levelTransitionVolume, &ALevelTransitionVolumeBase::EnemyDied);
+		deathEvent.AddDynamic(levelTransitionVolume, &ALevelTransitionVolumeBase::EnemyDied);
+	}
+
 	health = maxHealth;
 }
 
@@ -36,6 +50,11 @@ void AEnemyBase::Tick(float DeltaTime)
 
 }
 
+bool AEnemyBase::IsDead()
+{
+	return bIsDead;
+}
+
 float AEnemyBase::TakeDamage(float damageAmount, FDamageEvent const& damageEvent, AController* eventInstigator, AActor* damageCauser)
 {
 	ModifyHealth(-damageAmount);
@@ -44,7 +63,23 @@ float AEnemyBase::TakeDamage(float damageAmount, FDamageEvent const& damageEvent
 	{
 		bIsDead = true;
 		deathEvent.Broadcast();
-		Destroy();
+
+		if(ensure(GetController()))
+		{
+			AAIController* AIC = Cast<AAIController>(GetController());
+			if(ensure(AIC))
+			{
+				AIC->GetBrainComponent()->StopLogic("EnemyDied");
+			}
+		}
+
+		//RootComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_GameTraceChannel2);
+
+		UCapsuleComponent* caps = GetCapsuleComponent();
+		// caps->SetCollisionResponseToChannel(ECollisionChannel::ECC_GameTraceChannel2, ECollisionResponse::ECR_Ignore);
+		caps->SetCollisionProfileName("Ragdoll");
+
+		GetWorldTimerManager().SetTimer(deathTimerHandle, this, &AEnemyBase::DelayedDestroy, deathTimeBeforeRespawn, false);
 	}
 	return Super::TakeDamage(damageAmount, damageEvent, eventInstigator, damageCauser);
 }
@@ -62,44 +97,39 @@ void AEnemyBase::SetupStats()
 	FEnemyStatData* enemyStatData = enemyStatsTable->FindRow<FEnemyStatData>(enemyName, contextString);
 	if (enemyStatData == nullptr)
 	{
-#ifdef WITH_EDITOR
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(0, 2.f, FColor::Red
-				, TEXT("UNABLE TO FIND Enemy Stats for") + enemyName.ToString());
-		}
-#endif
+		UE_LOG(LogTemp, Warning, TEXT("Unable to find enemy stats for %s"), *GetName());
 		return;
 	}
-	maxHealth = enemyStatData->HP;
-	damage = enemyStatData->Attack;
+	/*maxHealth = enemyStatData->HP;
+	damage = enemyStatData->Attack;*/
 	attackSpeed = enemyStatData->AttackCooldown;
 	pursueRadius = enemyStatData->PursuitRadius;
 	attackRange = enemyStatData->AttackRange;
-	auto moveComponent = Cast<UFloatingPawnMovement>(GetMovementComponent());
+	bIsGrabbable = enemyStatData->IsGrabbable;
 
-	//TODO Set Movement to work properly for all enemies
+	auto moveComponent = Cast<UCharacterMovementComponent>(GetMovementComponent());
+
 	if (moveComponent)
 	{
-		moveComponent->MaxSpeed = enemyStatData->Speed;
+		moveComponent->MaxWalkSpeed = enemyStatData->Speed;
 	}
 
 	// TODO figure out how to determine static or skeletal (or choose one)
-	auto staticMesh = Cast<UStaticMeshComponent>(GetComponentByClass(UStaticMeshComponent::StaticClass()));
-	if (staticMesh)
+	
+	/*auto mesh = GetMesh();
+	if (mesh)
 	{
-		FBodyInstance* bodyInst = staticMesh->GetBodyInstance();
-		if (bodyInst)
-		{
-			bodyInst->MassScale = enemyStatData->Mass;
-			bodyInst->UpdateMassProperties();
-		}
-	}
+		FBodyInstance* bodyInst = mesh->GetBodyInstance();
+		bodyInst->MassScale = enemyStatData->Mass;
+		bodyInst->UpdateMassProperties();
+	}*/
 }
 
-AEnemyBase::FEnemyDeathEvent& AEnemyBase::OnDeath()
+void AEnemyBase::ApplyArmStayDamage()
 {
-	return deathEvent;
+	// ModifyHealth(armStayDamage);
+	AActor* Player = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
+	TakeDamage(armStayDamage, FPointDamageEvent(), Player->GetInstigatorController(), Player);
 }
 
 float AEnemyBase::GetMaxHealth() const
@@ -130,7 +160,13 @@ FGameplayTagContainer AEnemyBase::GetAbilityTags() const
 void AEnemyBase::ModifyHealth(float modifier)
 {
 	health += modifier;
+	//DrawDebugString(GetWorld(), GetTransform().GetLocation(), FString::Printf(TEXT("Damage: %.3f"), -modifier), nullptr, FColor::Red, 2.0f, false);
 	health = FMath::Clamp(health, 0, maxHealth);
+	if (health == 0)
+	{
+		hpZeroEvent.Broadcast();
+		hpZeroEvent.Clear();
+	}
 }
 
 void AEnemyBase::Stun_Implementation()
@@ -152,4 +188,19 @@ void AEnemyBase::FinishAttack()
 void AEnemyBase::ResetAttack()
 {
 	bAttackFinished = false;
+}
+
+void AEnemyBase::TakePeriodicDamage(float amount, float timeInterval)
+{
+	armStayDamage = amount;
+	GetWorldTimerManager().SetTimer(periodicDamageHandle, this, &AEnemyBase::ApplyArmStayDamage, timeInterval, true, timeInterval);
+}
+
+void AEnemyBase::StopPeriodicDamage()
+{
+		GetWorldTimerManager().ClearTimer(periodicDamageHandle);
+}
+
+void AEnemyBase::DelayedDestroy() {
+	Destroy();
 }

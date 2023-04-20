@@ -8,9 +8,13 @@
 #include "Components/TimelineComponent.h"
 #include "ArmSplineComponent.generated.h"
 
+
+class UDynamicCameraShake;
 class AEnemyBase;
 class ARCTCharacter;
 class USplineMeshComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FArmHitEvent, AEnemyBase*, hitEnemy);
 
 UENUM(BlueprintType)
 enum class EArmCollision : uint8 {
@@ -46,7 +50,7 @@ public:
 		float HideArmThreshold = 0.5;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
-		FVector TangentScale = FVector(1);
+		float TangentScale = 1.0f;
 
 
 	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
@@ -59,6 +63,8 @@ public:
 		UNiagaraSystem* ArmHitParticleEffect;
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "ArmHit")
 		USoundBase* ArmHitSound;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ArmHit")
+		TSubclassOf<UDynamicCameraShake> armHitCamShake;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Positions")
 		ARCTCharacter* PlayerCharacter;
@@ -76,6 +82,12 @@ public:
 
 	UFUNCTION()
 	void StopDevourBulgeTimeline();
+
+	UPROPERTY(BlueprintAssignable)
+	FArmHitEvent armHitEvent;
+
+	UFUNCTION()
+	void UpdateHandInput(FVector2D inputVector);
 
 	UArmSplineComponent();
 
@@ -99,6 +111,12 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "DevourEffect")
 	TArray<float> BulgeScaleIncrements;
+
+	UPROPERTY()
+	FVector2D HandInput;
+
+	UPROPERTY()
+	FVector2D HitPredict;
 	
 	void SetUpBulgeParameters();
 
@@ -155,6 +173,9 @@ public:
 
 	UFUNCTION( )
 	void OnOverlapEnd(class UPrimitiveComponent* OverlappedComp, class AActor* OtherActor, class UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+	UFUNCTION()
+	void RemoveOverlapRecord(AEnemyBase* enemy);
 	
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	UNiagaraSystem* GetArmHitParticleEffect() const;

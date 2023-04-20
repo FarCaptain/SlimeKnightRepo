@@ -22,8 +22,14 @@
 #include <Objects/GrabableObject.h>
 #include <SlimeKnightGameInstance.h>
 #include <SlimeKnightSaveGame.h>
+#include "Objects/GrabableLoreObject.h"
 
+#include "AIController.h"
 #include "ArmSplineComponent.h"
+#include "BrainComponent.h"
+#include "Components/SphereComponent.h"
+#include "Engine/BlockingVolume.h"
+#include "Kismet/KismetMathLibrary.h"
 
 
 // Sets default values
@@ -40,6 +46,7 @@ ARCTCharacter::ARCTCharacter()
 	handHolder = CreateDefaultSubobject<USceneComponent>(TEXT("HandHolder"));
 	handCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("HandCollision"));
 	punchCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("PunchCollision"));
+	grabRangeCollision = CreateDefaultSubobject<USphereComponent>(TEXT("GrabRangeSphere"));
 	
 	handTarget->SetupAttachment(RootComponent);
 	handHolder->SetupAttachment(RootComponent);
@@ -47,6 +54,9 @@ ARCTCharacter::ARCTCharacter()
 	holdPoint->SetupAttachment(realHand);
 	handCollision->SetupAttachment(realHand);
 	punchCollision->SetupAttachment(realHand);
+	grabRangeCollision->SetupAttachment(RootComponent);
+	grabRangeCollision->SetCollisionProfileName("ArmRangeCollision");
+	
 	
 	cameraBoom->SetupAttachment(RootComponent);
 	cameraBoom->bUsePawnControlRotation = false;
@@ -59,6 +69,9 @@ ARCTCharacter::ARCTCharacter()
 	armSplineComp = CreateDefaultSubobject<UArmSplineComponent>(TEXT("ArmSplineComponent"));
 	armSplineComp->SetupAttachment(RootComponent);
 
+	grabRangeCollision->SetSphereRadius(maxArmLength + grabRangeExtension);
+	originalMaxArmLength = maxArmLength;
+
 	ability = nullptr;
 	grabbedActor = nullptr;
 }
@@ -69,6 +82,16 @@ void ARCTCharacter::BeginPlay()
 	Super::BeginPlay();
 	OnTakeAnyDamage.AddDynamic(this, &ARCTCharacter::PlayerDamage);
 }
+
+void ARCTCharacter::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+	grabRangeCollision->OnComponentBeginOverlap.AddDynamic(this, &ARCTCharacter::OnActorEnterArmRange);
+	grabRangeCollision->OnComponentEndOverlap.AddDynamic(this, &ARCTCharacter::OnActorExitArmRange);
+
+	handTarget->OnComponentHit.AddDynamic(this, &ARCTCharacter::OnHandTargetHit);
+}
+
 
 // Called every frame
 void ARCTCharacter::Tick(float DeltaTime)
@@ -82,16 +105,19 @@ void ARCTCharacter::Tick(float DeltaTime)
 
 	curInvincibilityDuration -= DeltaTime;
 
+	if(!grabbing)
+	{
+		UpdateGrabTarget();
+	}
 
 	// Grab stamina cost
 	if (grabbing) {
 		currentStamina -= periodicStaminaCost * DeltaTime;
-
 		if (currentStamina <= 0)
 			LetGo();
 	}
 	// Replenish stamina if not grabbing
-	else { 
+	else {
 		currentStamina += staminaRechargePerSecond * DeltaTime;
 		currentStamina = (currentStamina >= maximumStamina) ? maximumStamina : currentStamina; // Clamp to maximum
 	}
@@ -104,6 +130,63 @@ void ARCTCharacter::Tick(float DeltaTime)
 	}
 }
 
+bool ARCTCharacter::CanDamage(UPrimitiveComponent* hitComponent)
+{
+	if(Cast<UArmSplineComponent>(hitComponent))
+	{
+		return false;
+	}
+	// a bit hacky, we are counting on the capsule collision for the body
+	if(Cast<UBoxComponent>(hitComponent))
+	{
+		return false;
+	}
+	return true;
+}
+
+void ARCTCharacter::UpdateGrabTarget()
+{
+	float currentMinAngle = 361.0f;// max Angle
+	if(grabTarget)
+	{
+		if(grabTarget->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()))
+		{
+			IGrabableInterface::Execute_SetHilighting(grabTarget, false);
+		}
+		grabTarget = nullptr;
+	}
+
+	auto findClosestActorInRange = [&] (TSet<AActor*>& actorsInRange)
+	{
+		for (AActor* actor : actorsInRange)
+		{
+			if (actor->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()) && IGrabableInterface::Execute_CanBeGrabbed(actor))
+			{
+				float gazeYaw = UKismetMathLibrary::FindLookAtRotation(GetActorLocation(), GetHandTargetLocation()).Yaw;
+				float enemyYaw = UKismetMathLibrary::FindLookAtRotation(GetActorLocation(), actor->GetActorLocation()).Yaw;
+				float angleDistance = abs(gazeYaw - enemyYaw);
+
+				if (IsValid(actor) && angleDistance < grabAngleTolerance && angleDistance < currentMinAngle)
+				{
+					currentMinAngle = angleDistance;
+					grabTarget = actor;
+				}
+			}
+		}
+	};
+
+	findClosestActorInRange(grabableEnemiesInRange);
+	if(grabTarget == nullptr)
+	{
+		// no luck with the enemies, try with object
+		findClosestActorInRange(grabableObjectsInRange);
+	}
+
+	if(grabTarget && grabTarget->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()))
+	{
+		IGrabableInterface::Execute_SetHilighting(grabTarget, true);
+	}
+}
 
 #pragma region Events and prototypes
 
@@ -166,8 +249,10 @@ void ARCTCharacter::PlayerDamage(AActor* DamagedActor, float Damage, const UDama
 	}
 }
 
-void ARCTCharacter::AbsorbAfterDamaging(float damageDealt) {
-	health += damageDealt * DevourHPStealPercent/100.f;
+void ARCTCharacter::AbsorbAfterDamaging(float damageDealt) 
+{
+	health += damageDealt * DevourHPStealPercent / 100.f;
+	health = FMath::Clamp(health, 0, maxHealth);
 	OnHealthChange(damageDealt * DevourHPStealPercent / 100.f);
 }
 
@@ -200,7 +285,15 @@ void ARCTCharacter::Devour()
 
 	AGrabableObject* go = Cast<AGrabableObject>(grabbedActor);
 
+	playerDevourEvent.Broadcast();
+
 	if (go) {
+		AGrabableLoreObject* glo = Cast<AGrabableLoreObject>(go);
+		if (glo)
+		{
+			grabbedName = glo->GetLoreKey();
+			loreUpdateWidgetEvent.Broadcast();
+		}
 		grabbedActor->Destroy();
 		grabbedActor = nullptr;
 	}
@@ -238,7 +331,8 @@ void ARCTCharacter::Devour()
 			}
 		}
 
-		grabbedActor->Destroy();
+		UGameplayStatics::ApplyDamage(grabbedActor, 10, GetController(), this, UDamageType::StaticClass());
+		//grabbedActor->Destroy();
 		grabbedActor = nullptr;
 	}
 
@@ -282,7 +376,14 @@ void ARCTCharacter::AutomateHand()
 {
 	FLatentActionInfo info;
 	info.CallbackTarget = this;
-	UKismetSystemLibrary::MoveComponentTo(handHolder, handTarget->GetRelativeLocation(), handTarget->GetRelativeRotation(), false, false, handMoveTime, false, EMoveComponentAction::Move, info);
+
+	float moveTime = handMoveTime;
+	if(IsValid(grabTarget))
+	{
+		moveTime *= grabMoveTimeScale;
+	}
+		
+	UKismetSystemLibrary::MoveComponentTo(handHolder, handTarget->GetRelativeLocation(), handTarget->GetRelativeRotation(), false, false, moveTime, true, EMoveComponentAction::Move, info);
 }
 
 void ARCTCharacter::UpdateHandTargetLocation()
@@ -311,21 +412,78 @@ void ARCTCharacter::UpdateHandTargetLocation()
 			inputLocation.Normalize();
 			inputLocation *= armMinimumDistance;
 		}
-
 	}
-	
 
 	inputLocation *= maxArmLength;
 
+	if(maxArmLength != originalMaxArmLength)
+	{
+		//update range sphere
+		grabRangeCollision->SetSphereRadius(maxArmLength + grabRangeExtension);
+		originalMaxArmLength = maxArmLength;
+	}
 
-	handTarget->SetRelativeLocation(FVector(0, 0, 0));
-	handTarget->SetRelativeLocation(inputLocation, true);
+	if(grabTarget && grabbing)
+	{
+		if(!IsValid(grabTarget))
+		{
+			LetGo();
+			return;
+		}
+
+		handTarget->SetWorldLocation(grabTarget->GetActorLocation());
+		if(FVector::Dist(handHolder->GetComponentLocation(), GetHandTargetLocation()) < grabRangeExtension + grabDistTolerance)
+		{
+			IGrabableInterface::Execute_Grab(grabTarget, this);
+			grabbedActor = grabTarget;
+
+			AGrabableEnemy* enemy = Cast<AGrabableEnemy>(grabTarget);
+			if(enemy)
+			{
+				// bulge effect
+				armSplineComp->StartDevourBulgeTimeline();
+			}
+
+			if(grabTarget->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()))
+			{
+				IGrabableInterface::Execute_SetHilighting(grabTarget, false);
+			}
+
+			grabTarget = nullptr;
+
+			realHand->SetCollisionProfileName(FName("BlockAllDynamic"));
+			punchCollision->SetCollisionProfileName(FName("BlockAllDynamic"));
+			punchCollision->OnComponentBeginOverlap.AddUniqueDynamic(this, &ARCTCharacter::OnFistBeginOverlap);
+		}
+	}
+	else
+	{
+		// relative to RCTCharacter
+		handTarget->SetRelativeLocation(FVector(0, 0, 0));
+		handTarget->SetRelativeLocation(inputLocation, true);
+
+		armSplineComp->UpdateHandInput(FVector2D(inputLocation.X, inputLocation.Y));
+	}
 }
 
-void ARCTCharacter::AttachToArm(AActor* ActorToAttach)
+void ARCTCharacter::OnHandTargetHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-	FAttachmentTransformRules rules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, EAttachmentRule::KeepWorld, true);
-	ActorToAttach->AttachToComponent(holdPoint, rules);
+	if(rightStickInputLocation.Length() < 0.001f)
+		return;
+	ABlockingVolume* BlockingVolume = Cast<ABlockingVolume>(OtherActor);
+	if(BlockingVolume)// && bBFromSweep
+	{
+		//reposition
+		AddMovementInput(Hit.ImpactNormal,0.9f);
+	}
+}
+
+void ARCTCharacter::AttachToArm(AActor* ActorToAttach, FName SocketName)
+{
+	ActorToAttach->SetActorLocation(holdPoint->GetComponentLocation());
+	// Socket on the holdPoint if appliable
+	FAttachmentTransformRules rules(EAttachmentRule::SnapToTarget, EAttachmentRule::KeepRelative, EAttachmentRule::KeepRelative, true);
+	ActorToAttach->AttachToComponent(holdPoint, rules, SocketName);
 }
 
 void ARCTCharacter::MultiplyHandSize(float scale)
@@ -334,13 +492,16 @@ void ARCTCharacter::MultiplyHandSize(float scale)
 	realHand->SetRelativeScale3D(size * scale);
 }
 
+bool pushing = false;
 void ARCTCharacter::UpdateArmX(float value)
 {
+	pushing = true;
 	rightStickInputLocation = FVector2D(value, rightStickInputLocation.Y);
 }
 
 void ARCTCharacter::UpdateArmY(float value)
 {
+	pushing = true;
 	rightStickInputLocation = FVector2D(rightStickInputLocation.X, value);
 }
 
@@ -375,29 +536,58 @@ void ARCTCharacter::Grab()
 	grabbing = true;
 	currentStamina -= initialGrabCost;
 
-	TSet<AActor*> actors;
-	handCollision->GetOverlappingActors(actors);
-	for (AActor* actor : actors)
+	if(grabTarget)
 	{
-		if (actor->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()))
+		AGrabableEnemy* enemy = Cast<AGrabableEnemy>(grabTarget);
+		if(enemy)
 		{
-			if (actor && IGrabableInterface::Execute_CanBeGrabbed(actor))
+			AAIController* controller = Cast<AAIController>(enemy->GetController());
+			if(controller)
 			{
-				IGrabableInterface::Execute_Grab(actor, this);
-				grabbedActor = actor;
-
-				// bulge effect
-				armSplineComp->StartDevourBulgeTimeline();
-
-				break;
+				// doesn't have to chase him
+				controller->GetBrainComponent()->PauseLogic("GrabTargeted");
 			}
 		}
 	}
-	realHand->SetCollisionProfileName(FName("BlockAllDynamic"));
-	punchCollision->SetCollisionProfileName(FName("BlockAllDynamic"));
-
-
+	else
+	{
+		// not targeting any enemy feel free to punch
+		realHand->SetCollisionProfileName(FName("BlockAllDynamic"));
+		punchCollision->SetCollisionProfileName(FName("BlockAllDynamic"));
+		punchCollision->OnComponentBeginOverlap.AddUniqueDynamic(this, &ARCTCharacter::OnFistBeginOverlap);
+	}
+	
 	OnGrab();
+}
+
+void ARCTCharacter::OnActorEnterArmRange(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bBFromSweep, const FHitResult& SweepResult)
+{
+	AGrabableEnemy* grabableEnemy = Cast<AGrabableEnemy>(OtherActor);
+	AGrabableObject* grabableObject = Cast<AGrabableObject>(OtherActor);
+	if(grabableEnemy)
+	{
+		// ignore grabable object for now
+		grabableEnemiesInRange.Add(OtherActor);
+	}
+	else if(grabableObject)
+	{
+		grabableObjectsInRange.Add(OtherActor);
+	}
+}
+
+void ARCTCharacter::OnActorExitArmRange(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	AGrabableEnemy* grabableEnemy = Cast<AGrabableEnemy>(OtherActor);
+	AGrabableObject* grabableObject = Cast<AGrabableObject>(OtherActor);
+	if(grabableEnemy)
+	{
+		// ignore grabable object for now
+		grabableEnemiesInRange.Remove(OtherActor);
+	}
+	else if(grabableObject)
+	{
+		grabableObjectsInRange.Remove(OtherActor);
+	}
 }
 
 void ARCTCharacter::LetGo()
@@ -407,20 +597,52 @@ void ARCTCharacter::LetGo()
 	readyToDevour = false;
 	grabbing = false;
 
+	if(grabTarget)
+	{
+		AGrabableEnemy* enemy = Cast<AGrabableEnemy>(grabTarget);
+		if(enemy)
+		{
+			AAIController* controller = Cast<AAIController>(enemy->GetController());
+			if(controller)
+			{
+				controller->GetBrainComponent()->ResumeLogic("UnGrabTargeted");
+			}
+		}
+		if(grabTarget->GetClass()->ImplementsInterface(UGrabableInterface::StaticClass()))
+		{
+			IGrabableInterface::Execute_SetHilighting(grabTarget, false);
+		}
+		grabTarget = nullptr;
+	}
+
 	if (grabbedActor)
 	{
 		armSplineComp->StopDevourBulgeTimeline();
 		IGrabableInterface::Execute_LetGo(grabbedActor, this);
+
+		// make sure we recalculate collision
+		armSplineComp->RemoveOverlapRecord(Cast<AEnemyBase>(grabbedActor));
 		grabbedActor = nullptr;
 	}
 	realHand->SetCollisionProfileName(FName("NoCollision"));
 	punchCollision->SetCollisionProfileName(FName("NoCollision"));
+	punchCollision->OnComponentBeginOverlap.RemoveDynamic(this, &ARCTCharacter::OnFistBeginOverlap);
 }
 
 void ARCTCharacter::HandleDeathCase()
 {
 	bIsDead = true;
 	playerDeathEvent.Broadcast();
+}
+
+void ARCTCharacter::OnFistBeginOverlap(UPrimitiveComponent * overlappedComp, AActor * otherActor, UPrimitiveComponent * otherComp
+                                       , int32 otherBodyIndex, bool bFromSweep, const FHitResult & sweepResult)
+{
+	auto enemy = Cast<AGrabableEnemy>(otherActor);
+	if (enemy != nullptr)
+	{
+		enemy->HitByFist();
+	}
 }
 
 #pragma endregion
