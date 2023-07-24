@@ -17,5 +17,4 @@ void USkeleArmComponent::RotateArm()
 	FRotator HandRot = UKismetMathLibrary::FindLookAtRotation(this->GetRelativeLocation(), FVector::Zero());
 	HandRot.Add(PitchMod, YawMod, RollMod);
 	SetRelativeRotation(HandRot);
-	//GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, FString::Printf(TEXT("Rotator: %f %f %f"), HandRot.Pitch, HandRot.Yaw, HandRot.Roll));
 }

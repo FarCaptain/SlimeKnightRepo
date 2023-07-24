@@ -13,10 +13,13 @@
 class AGrabableEnemy;
 class UGrabableInterface;
 class USphereComponent;
+class UBoxComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FPlayerDeathEvent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FPlayerDevourEvent);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FLoreUpdateWidget);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_SixParams(FPlayerPunchEvent, UPrimitiveComponent*, overlappedComp, AActor*, otherActor,
+	UPrimitiveComponent*, otherComp, int32, otherBodyIndex, bool, bFromSweep, const FHitResult&, sweepResult);
 
 UCLASS()
 class RCT_API ARCTCharacter : public ACharacter
@@ -127,6 +130,9 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FPlayerDevourEvent playerDevourEvent;
 
+	UPROPERTY(BlueprintAssignable)
+	FPlayerPunchEvent playerPunchEvent;
+
 	UPROPERTY(BlueprintCallable, BlueprintAssignable)
 	FLoreUpdateWidget loreUpdateWidgetEvent;
 
@@ -186,9 +192,6 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly)
 	UBaseAbility* ability = nullptr;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
-	class UBoxComponent* handCollision;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	USphereComponent* grabRangeCollision;

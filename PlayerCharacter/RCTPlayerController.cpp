@@ -35,7 +35,7 @@ void ARCTPlayerController::ArmX(float value)
 {
 	if(myPawn)
 	myPawn->UpdateArmX(value);
-}
+	}
 
 void ARCTPlayerController::ArmY(float value)
 {

@@ -13,6 +13,7 @@ class UDynamicCameraShake;
 class AEnemyBase;
 class ARCTCharacter;
 class USplineMeshComponent;
+class UCapsuleComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FArmHitEvent, AEnemyBase*, hitEnemy);
 
@@ -39,6 +40,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spline")
 		UMaterialInstance* SplineMeshMaterial;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spline")
+		UCapsuleComponent* CapsuleComponent;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spline")
 		int32 SplinePointCount = 25;
 
@@ -55,6 +59,8 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
 		float ArmHitDamage = 1.f;
+	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
+		float ArmDamageMultiplier = 1.f;
 	UPROPERTY(BlueprintReadWrite, Category="ArmHit")
 		float ArmStayDamage = 0.2f;
 	UPROPERTY(BlueprintReadWrite, Category="ArmHit")

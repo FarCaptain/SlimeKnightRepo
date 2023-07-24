@@ -44,7 +44,6 @@ ARCTCharacter::ARCTCharacter()
 	cameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	isoCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("IsoCamera"));
 	handHolder = CreateDefaultSubobject<USceneComponent>(TEXT("HandHolder"));
-	handCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("HandCollision"));
 	punchCollision = CreateDefaultSubobject<UBoxComponent>(TEXT("PunchCollision"));
 	grabRangeCollision = CreateDefaultSubobject<USphereComponent>(TEXT("GrabRangeSphere"));
 	
@@ -52,7 +51,6 @@ ARCTCharacter::ARCTCharacter()
 	handHolder->SetupAttachment(RootComponent);
 	realHand->SetupAttachment(handHolder);
 	holdPoint->SetupAttachment(realHand);
-	handCollision->SetupAttachment(realHand);
 	punchCollision->SetupAttachment(realHand);
 	grabRangeCollision->SetupAttachment(RootComponent);
 	grabRangeCollision->SetCollisionProfileName("ArmRangeCollision");
@@ -470,8 +468,7 @@ void ARCTCharacter::OnHandTargetHit(UPrimitiveComponent* HitComponent, AActor* O
 {
 	if(rightStickInputLocation.Length() < 0.001f)
 		return;
-	ABlockingVolume* BlockingVolume = Cast<ABlockingVolume>(OtherActor);
-	if(BlockingVolume)// && bBFromSweep
+	if(OtherComp->GetCollisionProfileName() == "InvisibleWall")
 	{
 		//reposition
 		AddMovementInput(Hit.ImpactNormal,0.9f);
@@ -642,6 +639,7 @@ void ARCTCharacter::OnFistBeginOverlap(UPrimitiveComponent * overlappedComp, AAc
 	if (enemy != nullptr)
 	{
 		enemy->HitByFist();
+		playerPunchEvent.Broadcast(overlappedComp, otherActor, otherComp, otherBodyIndex, bFromSweep, sweepResult);
 	}
 }
 

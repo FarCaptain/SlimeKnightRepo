@@ -4,6 +4,7 @@
 
 #include "DynamicCameraShake.h"
 #include "NiagaraFunctionLibrary.h"
+#include "Components/CapsuleComponent.h"
 #include "Enemies/GrabableEnemy.h"
 #include "Engine/ICookInfo.h"
 #include "GameFramework/Character.h"
@@ -19,6 +20,9 @@ UArmSplineComponent::UArmSplineComponent()
 	Spline = CreateDefaultSubobject<USplineComponent>("Spline");
 	Spline->SetMobility(EComponentMobility::Movable);
 
+	CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>("CapsuleComponent");
+	CapsuleComponent->SetMobility(EComponentMobility::Movable);
+
 	Spline->ClearSplinePoints();
 	HandInput = FVector2D::Zero();
 }
@@ -29,6 +33,12 @@ void UArmSplineComponent::OnComponentCreated()
 
 	SetUpSplineMeshes();
 	Spline->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
+
+	// set collision
+	CapsuleComponent->SetCollisionProfileName(FName("SplineArm"));
+	CapsuleComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CapsuleComponent->OnComponentBeginOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapBegin);
+	CapsuleComponent->OnComponentEndOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapEnd);
 
 	SetUpBulgeParameters();
 }
@@ -126,11 +136,10 @@ void UArmSplineComponent::SetUpSplineMeshes()
 		
 		splineMesh->SetMaterial(0, SplineMeshMaterial);
 
-		splineMesh->SetCollisionProfileName(FName("SplineArm"));
-		splineMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-
-		splineMesh->OnComponentBeginOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapBegin);
-		splineMesh->OnComponentEndOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapEnd);
+		// splineMesh->SetCollisionProfileName(FName("SplineArm"));
+		// splineMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		// splineMesh->OnComponentBeginOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapBegin);
+		// splineMesh->OnComponentEndOverlap.AddDynamic(this, &UArmSplineComponent::OnOverlapEnd);
 
 		SplineMeshes.Add(splineMesh);
 	}
@@ -188,11 +197,23 @@ void UArmSplineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		}
 		SetSplineMeshScale(splineMesh, startScale, endScale);
 		splineMesh->UpdateMesh();
-
-		// make it sweep
-		// FHitResult HitResult;
-		// splineMesh->MoveComponent(FVector::ZeroVector, splineMesh->GetComponentRotation(), true, &HitResult);
 	}
+
+	FVector startPoint = shoulderPos;
+	FVector endPoint = realHandPos;
+	FVector capsuleCenter = (startPoint + endPoint) * 0.5f;
+	float capsuleHalfHeight = (endPoint - startPoint).Length() * 0.5f;
+	CapsuleComponent->SetCapsuleHalfHeight(capsuleHalfHeight);
+	CapsuleComponent->SetCapsuleRadius(SplineMeshStartScale.X * SplineMeshStaticMesh->GetBounds().BoxExtent.Y);
+
+	FVector CapsuleUpVector = CapsuleComponent->GetUpVector();
+	FVector DesiredUpVector = endPoint - startPoint;
+	FQuat RotationQuat = FQuat::FindBetween(CapsuleUpVector, DesiredUpVector);
+	CapsuleComponent->SetRelativeRotation(RotationQuat * CapsuleComponent->GetRelativeRotation().Quaternion());
+	
+	
+	FHitResult hitResult;
+	CapsuleComponent->SetWorldLocation(capsuleCenter, true, &hitResult);
 }
 
 //Cubic Bezier Curve
@@ -221,7 +242,7 @@ UNiagaraSystem* UArmSplineComponent::GetArmHitParticleEffect() const
 
 void UArmSplineComponent::OnEnemyOverlaped_Implementation(AEnemyBase* enemy)
 {
-	enemy->TakeDamage(ArmHitDamage, FPointDamageEvent(), PlayerCharacter->GetInstigatorController(), PlayerCharacter);
+	enemy->TakeDamage(ArmDamageMultiplier * ArmHitDamage, FPointDamageEvent(), PlayerCharacter->GetInstigatorController(), PlayerCharacter);
 	enemy->Stun();
 	UNiagaraFunctionLibrary::SpawnSystemAtLocation( GetWorld(), ArmHitParticleEffect, enemy->GetTransform().GetLocation());
 	UGameplayStatics::PlaySound2D(GetWorld(), ArmHitSound);
