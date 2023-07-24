@@ -37,7 +37,7 @@ void AEnemyBase::BeginPlay()
 	{
 		levelTransitionVolume -> enemyCount++;
 		// deathEvent.AddUObject(levelTransitionVolume, &ALevelTransitionVolumeBase::EnemyDied);
-		deathEvent.AddDynamic(levelTransitionVolume, &ALevelTransitionVolumeBase::EnemyDied);
+		hpZeroEvent.AddDynamic(levelTransitionVolume, &ALevelTransitionVolumeBase::EnemyDied);
 	}
 
 	health = maxHealth;
@@ -48,6 +48,16 @@ void AEnemyBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+}
+
+void AEnemyBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	if (EndPlayReason == EEndPlayReason::Destroyed)
+	{
+		deathEvent.Broadcast();
+	}
 }
 
 bool AEnemyBase::IsDead()
@@ -62,7 +72,7 @@ float AEnemyBase::TakeDamage(float damageAmount, FDamageEvent const& damageEvent
 	if (health == 0 && !bIsDead)
 	{
 		bIsDead = true;
-		deathEvent.Broadcast();
+		//deathEvent.Broadcast();
 
 		if(ensure(GetController()))
 		{

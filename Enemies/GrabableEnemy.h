@@ -17,7 +17,7 @@ class RCT_API AGrabableEnemy : public AEnemyBase, public IGrabableInterface
 public:
 	// Sets default values for this pawn's properties
 	AGrabableEnemy();
-
+	
 	void Grab_Implementation(ARCTCharacter* character) override;
 	UFUNCTION()
 	void LetGo_Implementation(ARCTCharacter* character) override;
@@ -60,7 +60,7 @@ protected:
 	UFUNCTION()
 	void OverlapExplode(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
 
-	UFUNCTION()
+	UFUNCTION(BlueprintCallable)
 	void Explode();
 
 	virtual void FellOutOfWorld(const UDamageType& dmgType) override;

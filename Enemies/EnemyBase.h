@@ -9,6 +9,7 @@
 #include "EnemyBase.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FEnemyDeathEvent);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FEnemyHPZeroEvent);
 
 UCLASS()
 class RCT_API AEnemyBase : public ACharacter
@@ -22,7 +23,7 @@ public:
 	// Sets default values for this pawn's properties
 	AEnemyBase();
 
-	
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	/** Returns Enemies Max Health */
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	float GetMaxHealth() const;
@@ -118,7 +119,9 @@ protected:
 
 	UPROPERTY(BlueprintAssignable)
 	FEnemyDeathEvent deathEvent;
-	FEnemyDeathEvent hpZeroEvent;
+
+	UPROPERTY(BlueprintAssignable)
+	FEnemyHPZeroEvent hpZeroEvent;
 
 	/** Tags to define behavior and abilities */
 	UPROPERTY(EditAnywhere)

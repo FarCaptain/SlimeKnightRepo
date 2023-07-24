@@ -238,8 +238,6 @@ void AGrabableEnemy::Explode()
 			player->GetThrowExplosionRadius(), UDamageType::StaticClass(), ignoreActors, this);
 		if (health <= 0)
 		{
-			deathEvent.Broadcast();
-			deathEvent.Clear();
 			Destroy();
 		}
 	}
@@ -251,13 +249,18 @@ void AGrabableEnemy::Explode()
 
 void AGrabableEnemy::FellOutOfWorld(const UDamageType& dmgType)
 {
-	Explode();
-	//Check health just to be safe
 	if (health > 0) 
 	{
-		deathEvent.Broadcast();
-		deathEvent.Clear();
+		hpZeroEvent.Broadcast();
 	}
+
+	Explode();
+	//Check health just to be safe
+	//if (health > 0) 
+	//{
+		//deathEvent.Broadcast();
+		//deathEvent.Clear();
+	//}
 
 	Super::FellOutOfWorld(dmgType);
 }
